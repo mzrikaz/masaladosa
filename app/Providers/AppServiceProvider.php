@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Contracts\Repositories\ArticleRepository;
+use App\Contracts\Repositories\SourceRepository;
+use App\Repositories\EloquentArticleRepository;
+use App\Repositories\EloquentSourceRepository;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +19,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(SourceRepository::class, EloquentSourceRepository::class);
+        $this->app->bind(ArticleRepository::class, EloquentArticleRepository::class);
     }
 
     /**

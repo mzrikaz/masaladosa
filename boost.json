@@ -13,7 +13,9 @@
     "nightwatch": false,
     "sail": false,
     "skills": [
+        "ai-sdk-development",
         "laravel-best-practices",
+        "configuring-horizon",
         "livewire-development",
         "tailwindcss-development"
     ]

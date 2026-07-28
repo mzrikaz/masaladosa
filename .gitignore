@@ -22,3 +22,10 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+/.agents
+/.claude
+/.factory
+/.grok
+/.kiro
+comoser.lock
+package-lock.json
