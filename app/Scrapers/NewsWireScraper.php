@@ -24,7 +24,7 @@ class NewsWireScraper implements SourceScraper
      */
     public function scrapeLatest(Source $source): array
     {
-        $listingHtml = Http::get($source->base_url)->throw()->body();
+        $listingHtml = Http::newsSource()->get($source->base_url)->throw()->body();
 
         $links = $this->extractListingLinks($listingHtml);
 
@@ -78,7 +78,7 @@ class NewsWireScraper implements SourceScraper
 
     private function scrapeArticle(string $url): ?ScrapedArticle
     {
-        $html = Http::get($url)->throw()->body();
+        $html = Http::newsSource()->get($url)->throw()->body();
 
         if (! preg_match('/<h1[^>]*>([^<]+)<\/h1>/', $html, $titleMatch)) {
             return null;

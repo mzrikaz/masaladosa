@@ -30,7 +30,7 @@ class AdaDeranaEnglishScraper implements SourceScraper
      */
     public function scrapeLatest(Source $source): array
     {
-        $listingHtml = Http::get($source->base_url)->throw()->body();
+        $listingHtml = Http::newsSource()->get($source->base_url)->throw()->body();
 
         $cards = $this->extractListingCards($listingHtml);
 
@@ -96,7 +96,7 @@ class AdaDeranaEnglishScraper implements SourceScraper
 
     private function scrapeArticle(string $url, ?Carbon $publishedAt): ?ScrapedArticle
     {
-        $html = Http::get($url)->throw()->body();
+        $html = Http::newsSource()->get($url)->throw()->body();
 
         if (! preg_match('/<meta property="og:title" content="([^"]*)"\/>/', $html, $titleMatch)) {
             return null;

@@ -26,7 +26,7 @@ class HiruNewsScraper implements SourceScraper
      */
     public function scrapeLatest(Source $source): array
     {
-        $listingHtml = Http::get($source->base_url)->throw()->body();
+        $listingHtml = Http::newsSource()->get($source->base_url)->throw()->body();
 
         $cards = $this->extractListingCards($listingHtml);
 
@@ -90,7 +90,7 @@ class HiruNewsScraper implements SourceScraper
 
     private function scrapeArticle(string $url, ?Carbon $publishedAt): ?ScrapedArticle
     {
-        $html = Http::get($url)->throw()->body();
+        $html = Http::newsSource()->get($url)->throw()->body();
 
         if (! preg_match('/<h1 class="head-title">([^<]+)<\/h1>/', $html, $titleMatch)) {
             return null;

@@ -9,6 +9,7 @@ use App\Repositories\EloquentSourceRepository;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -37,6 +38,13 @@ class AppServiceProvider extends ServiceProvider
     protected function configureDefaults(): void
     {
         Date::use(CarbonImmutable::class);
+
+        // News sites commonly block Laravel/Guzzle's default User-Agent as an
+        // obvious bot signature. Scrapers use this macro instead of Http::get()
+        // directly to send a realistic desktop browser UA.
+        Http::macro('newsSource', fn () => Http::withHeaders([
+            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        ])->timeout(20));
 
         DB::prohibitDestructiveCommands(
             app()->isProduction(),

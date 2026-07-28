@@ -47,7 +47,19 @@
         </main>
 
         <footer class="mx-auto max-w-2xl border-t border-zinc-100 px-4 py-8 text-sm text-zinc-400 sm:px-6">
-            {{ config('app.name') }} rephrases breaking news from Sri Lankan news portals using AI. Every story links back to its original source.
+            <p>
+                {{ config('app.name') }} rephrases breaking news from Sri Lankan news portals using AI. Every story links back to its original source.
+            </p>
+
+            @auth
+                <p class="mt-4 flex items-center gap-4">
+                    <a href="/horizon" class="underline underline-offset-4 hover:text-zinc-700">Horizon</a>
+                    <form method="POST" action="{{ route('logout') }}">
+                        @csrf
+                        <button type="submit" class="underline underline-offset-4 hover:text-zinc-700">Log out</button>
+                    </form>
+                </p>
+            @endauth
         </footer>
 
         @livewireScripts
