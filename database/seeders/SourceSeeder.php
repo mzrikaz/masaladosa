@@ -44,6 +44,7 @@ class SourceSeeder extends Seeder
                 'name' => 'Hiru News',
                 'language' => NewsLanguage::Sinhala,
                 'base_url' => 'https://www.hirunews.lk/',
+                'is_active' => false, // retired in favor of Lankadeepa, see LankadeepaScraper
             ],
             [
                 'key' => SourceKey::Lankadeepa,

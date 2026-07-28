@@ -32,7 +32,7 @@ class ScraperFactory
             SourceKey::NewsWire => NewsWireScraper::class,
             SourceKey::AdaDeranaEnglish => AdaDeranaEnglishScraper::class,
             SourceKey::AdaDeranaTamil => AdaDeranaTamilScraper::class,
-            SourceKey::HiruNews => HiruNewsScraper::class,
+            SourceKey::Lankadeepa => LankadeepaScraper::class,
             default => null,
         };
     }
