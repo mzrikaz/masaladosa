@@ -5,6 +5,8 @@ namespace App\Scrapers;
 use App\Contracts\Scrapers\SourceScraper;
 use App\DataTransferObjects\ScrapedArticle;
 use App\Models\Source;
+use App\Support\Dom\HtmlDocument;
+use DOMElement;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -81,24 +83,40 @@ class LankadeepaScraper implements SourceScraper
      */
     private function extractListingUrls(string $html): array
     {
-        preg_match_all('/href="(https:\/\/www\.lankadeepa\.lk\/news\/[^"]+)"/', $html, $matches);
+        $dom = new HtmlDocument($html);
 
-        return array_values(array_unique($matches[1]));
+        $urls = [];
+
+        foreach ($dom->elements('//a[starts-with(@href, "https://www.lankadeepa.lk/news/")]') as $anchor) {
+            $urls[] = $dom->attr($anchor, 'href');
+        }
+
+        return array_values(array_unique(array_filter($urls)));
     }
 
     private function scrapeArticle(string $url): ?ScrapedArticle
     {
         $html = Http::newsSource()->get($url)->throw()->body();
 
-        if (! preg_match('/<h1 class="article-title sinhala-head mb-3">(.*?)<\/h1>/s', $html, $titleMatch)) {
+        $dom = new HtmlDocument($html);
+
+        $title = $dom->text($dom->first(
+            '//h1['.HtmlDocument::hasClass('article-title').' and '.HtmlDocument::hasClass('sinhala-head').']'
+        ));
+
+        if ($title === null) {
             return null;
         }
 
-        if (! preg_match('/<div class="article-body sinhala-body">(.*?)<\/div>/s', $html, $bodyMatch)) {
+        $container = $dom->first(
+            '//div['.HtmlDocument::hasClass('article-body').' and '.HtmlDocument::hasClass('sinhala-body').']'
+        );
+
+        if ($container === null) {
             return null;
         }
 
-        $body = $this->extractParagraphs($bodyMatch[1]);
+        $body = $this->extractParagraphs($dom, $container);
 
         if ($body === '') {
             return null;
@@ -106,37 +124,34 @@ class LankadeepaScraper implements SourceScraper
 
         return new ScrapedArticle(
             externalUrl: $url,
-            title: html_entity_decode(trim(strip_tags($titleMatch[1]))),
+            title: $title,
             body: $body,
-            imageUrl: $this->extractImage($bodyMatch[1]),
-            publishedAt: $this->extractPublishedAt($html),
+            imageUrl: $this->extractImage($dom, $container),
+            publishedAt: $this->extractPublishedAt($dom),
         );
     }
 
-    private function extractParagraphs(string $bodyHtml): string
+    private function extractParagraphs(HtmlDocument $dom, DOMElement $container): string
     {
-        preg_match_all('/<p[^>]*>(.*?)<\/p>/s', $bodyHtml, $paragraphMatches);
-
-        $paragraphs = array_map(
-            fn (string $paragraph): string => trim(str_replace("\u{a0}", ' ', html_entity_decode(strip_tags($paragraph)))),
-            $paragraphMatches[1],
-        );
+        $paragraphs = $dom->paragraphs('.//p', $container);
 
         return implode("\n\n", array_filter($paragraphs, fn (string $paragraph): bool => $paragraph !== ''));
     }
 
-    private function extractImage(string $bodyHtml): ?string
+    private function extractImage(HtmlDocument $dom, DOMElement $container): ?string
     {
-        if (preg_match('/<img src="([^"]+)"/', $bodyHtml, $match)) {
-            return $match[1];
-        }
-
-        return null;
+        return $dom->attr($dom->first('.//img', $container), 'src');
     }
 
-    private function extractPublishedAt(string $html): ?Carbon
+    private function extractPublishedAt(HtmlDocument $dom): ?Carbon
     {
-        if (! preg_match('/(\d{4})\s+(\S+)\s+(\d{1,2})\s*\|\s*(පෙ\.ව\.|ප\.ව\.)\s*(\d{1,2}):(\d{2})/u', $html, $match)) {
+        $meta = $dom->text($dom->first('//div['.HtmlDocument::hasClass('article-meta').']'));
+
+        if ($meta === null) {
+            return null;
+        }
+
+        if (! preg_match('/(\d{4})\s+(\S+)\s+(\d{1,2})\s*\|\s*(පෙ\.ව\.|ප\.ව\.)\s*(\d{1,2}):(\d{2})/u', $meta, $match)) {
             return null;
         }
 

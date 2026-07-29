@@ -5,6 +5,7 @@ namespace App\Scrapers;
 use App\Contracts\Scrapers\SourceScraper;
 use App\DataTransferObjects\ScrapedArticle;
 use App\Models\Source;
+use App\Support\Dom\HtmlDocument;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -60,31 +61,33 @@ class NewsWireScraper implements SourceScraper
      */
     private function extractListingLinks(string $html): array
     {
-        preg_match_all(
-            '/<a href="(https:\/\/www\.newswire\.lk\/[^"]+)" rel="bookmark" itemprop="url">([^<]+)<\/a>/',
-            $html,
-            $matches,
-            PREG_SET_ORDER,
-        );
+        $dom = new HtmlDocument($html);
 
-        return array_map(
-            fn (array $match): array => [
-                'url' => $match[1],
-                'title' => html_entity_decode(trim($match[2])),
-            ],
-            $matches,
-        );
+        $links = [];
+
+        foreach ($dom->elements('//a[@rel="bookmark" and @itemprop="url" and starts-with(@href, "https://www.newswire.lk/")]') as $node) {
+            $links[] = [
+                'url' => $dom->attr($node, 'href') ?? '',
+                'title' => $dom->text($node) ?? '',
+            ];
+        }
+
+        return $links;
     }
 
     private function scrapeArticle(string $url): ?ScrapedArticle
     {
         $html = Http::newsSource()->get($url)->throw()->body();
 
-        if (! preg_match('/<h1[^>]*>([^<]+)<\/h1>/', $html, $titleMatch)) {
+        $dom = new HtmlDocument($html);
+
+        $title = $dom->text($dom->first('(//h1)[1]'));
+
+        if ($title === null) {
             return null;
         }
 
-        $body = $this->extractBody($html);
+        $body = $this->extractBody($dom);
 
         if ($body === '') {
             return null;
@@ -92,46 +95,41 @@ class NewsWireScraper implements SourceScraper
 
         return new ScrapedArticle(
             externalUrl: $url,
-            title: html_entity_decode(trim($titleMatch[1])),
+            title: $title,
             body: $body,
-            imageUrl: $this->extractImage($html),
-            publishedAt: $this->extractPublishedAt($html),
+            imageUrl: $dom->attr($dom->first('//meta[@property="og:image"]'), 'content'),
+            publishedAt: $this->extractPublishedAt($dom),
         );
     }
 
-    private function extractBody(string $html): string
+    private function extractBody(HtmlDocument $dom): string
     {
-        if (! preg_match('/<div class="entry-content" itemprop="articleBody">(.*?)<\/div>\s*(?:<div class="screen-reader-text"|<footer)/s', $html, $match)) {
+        $container = $dom->first(
+            '//div[@itemprop="articleBody" and '.HtmlDocument::hasClass('entry-content').']'
+        );
+
+        if ($container === null) {
             return '';
         }
 
-        preg_match_all('/<p[^>]*>(.*?)<\/p>/s', $match[1], $paragraphMatches);
-
-        $paragraphs = array_map(
-            fn (string $paragraph): string => trim(str_replace("\u{a0}", ' ', html_entity_decode(strip_tags($paragraph)))),
-            $paragraphMatches[1],
-        );
+        $paragraphs = $dom->paragraphs('.//p', $container);
 
         return implode("\n\n", array_filter($paragraphs, fn (string $paragraph): bool => $paragraph !== ''));
     }
 
-    private function extractImage(string $html): ?string
+    private function extractPublishedAt(HtmlDocument $dom): ?Carbon
     {
-        if (preg_match('/<meta property="og:image" content="([^"]+)"/', $html, $match)) {
-            return $match[1];
-        }
+        $datetime = $dom->attr(
+            $dom->first('//time[@datetime and '.HtmlDocument::hasClass('entry-published').']'),
+            'datetime',
+        );
 
-        return null;
-    }
-
-    private function extractPublishedAt(string $html): ?Carbon
-    {
-        if (! preg_match('/<time class="entry-published updated" datetime="([^"]+)"/', $html, $match)) {
+        if ($datetime === null) {
             return null;
         }
 
         // The site publishes with an explicit +05:30 offset; normalize to
         // UTC so it round-trips correctly through the "UTC" app timezone.
-        return Carbon::parse($match[1])->utc();
+        return Carbon::parse($datetime)->utc();
     }
 }

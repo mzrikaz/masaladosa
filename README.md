@@ -219,15 +219,15 @@ interface SourceScraper
 
 `ScrapedArticle` (`app/DataTransferObjects/ScrapedArticle.php`) is a plain readonly DTO: `externalUrl`, `title`, `body`, `imageUrl`, `publishedAt`.
 
-**No HTML parsing library is used — every scraper is hand-written `preg_match`/`preg_match_all` regex against the raw HTTP response body.** This was a deliberate choice (not a Laravel-ism — pure PHP), because these sites are mostly Next.js apps whose useful content is either server-rendered into predictable class-named `<div>`s, or exposed as clean `og:title`/`og:image` meta tags. A full DOM parser would be more robust against markup changes, but regex keeps every scraper a single dependency-free file you can read top to bottom.
+**No third-party HTML parsing library is used — every scraper queries the raw HTTP response body with PHP's built-in `DOMDocument`/`DOMXPath` (wrapped by `app/Support/Dom/HtmlDocument.php`).** This was a deliberate choice (not a Laravel-ism — pure PHP), because these sites are mostly Next.js apps whose useful content is either server-rendered into predictable class-named `<div>`s, or exposed as clean `og:title`/`og:image` meta tags. Scrapers originally used regex directly against the HTML string, but regex can't correctly handle nested tags — a "match up to the next closing `</div>`" pattern silently truncates content if the CMS ever nests another `<div>` inside the block being extracted. `DOMXPath` selects by attribute (`HtmlDocument::hasClass('entry-content')`, `og:title` meta, etc.) instead of by raw string position, so it's immune to that whole class of bug while still being a single dependency-free extension (`ext-dom`, bundled with PHP) rather than a Composer package.
 
 The general shape every scraper follows:
 
 1. **Fetch the listing page** (`Http::get($source->base_url)`).
 2. **Extract article links in newest-first order.**
 3. **Walk that list, stopping at `$source->last_scraped_external_url`** (the cursor) — everything above it in the list is new. Capped at `MAX_ARTICLES_PER_RUN` (20) so a first-ever run doesn't try to backfill a site's entire history.
-4. **For each new link, fetch the article's own page** and regex out title / body / image / published-at. (Two sources — Ada Derana English and Hiru News — don't expose a reliable absolute timestamp on the article page itself, so their scrapers instead capture a relative time like `"2h ago"` from the *listing* page and convert it to an absolute `Carbon` timestamp at scrape time.)
-5. **Strip HTML from the body** down to plain paragraphs, dropping empty/`&nbsp;`-only filler `<p>` tags that some CMSs insert between real paragraphs.
+4. **For each new link, fetch the article's own page** and extract title / body / image / published-at via `DOMXPath`. (Ada Derana English doesn't expose a reliable absolute timestamp on the article page itself, so its scraper instead captures a relative time like `"2h ago"` from the *listing* page and converts it to an absolute `Carbon` timestamp at scrape time.)
+5. **Read the body paragraphs' `textContent`**, dropping empty/`&nbsp;`-only filler `<p>` tags that some CMSs insert between real paragraphs — `textContent` also sidesteps HTML comments some sites leave behind from client-side hydration, so there's no need to strip them separately.
 6. **Normalize every timestamp to UTC.** Sri Lankan sites display times in `Asia/Colombo` (+05:30) with no explicit offset — every scraper anchors the parsed time to that zone, then calls `->utc()` before returning it, because the app's own timezone (`config/app.php`) is UTC and a naive/unconverted Colombo time would silently drift 5.5 hours when round-tripped through the database.
 
 Back in `NewsIngestionService::ingest()`:
@@ -437,5 +437,5 @@ Both are first-party/Laravel-ecosystem tools, already configured — no `.pretti
 
 - **5 of 9 seeded sources have no scraper yet** (News First, Ada Derana Sinhala, Lankadeepa, Virakesari, Tamil Mirror) — see [Adding a new news source](#adding-a-new-news-source).
 - **No admin/moderation UI.** `users.is_admin` exists and gates the Horizon dashboard, but there's no login page yet — add one before relying on that gate anywhere it matters.
-- **Regex-based scraping is inherently brittle.** Every scraper will break the day its target site redesigns. There's no automated alerting for this yet beyond a job landing in Horizon's failed-jobs list.
+- **Scraping is still markup-coupled.** `DOMXPath` selection is immune to nested-tag truncation, but every scraper will still break the day its target site renames the classes/attributes it selects on. There's no automated alerting for this yet beyond a job landing in Horizon's failed-jobs list.
 - **Horizon's dashboard has no auth in the `local` environment by design** — fine for development, not for a publicly reachable `/horizon` in production without wiring up real login first.

@@ -5,6 +5,7 @@ namespace App\Scrapers;
 use App\Contracts\Scrapers\SourceScraper;
 use App\DataTransferObjects\ScrapedArticle;
 use App\Models\Source;
+use App\Support\Dom\HtmlDocument;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -63,12 +64,13 @@ class AdaDeranaTamilScraper implements SourceScraper
      */
     private function extractListingUrls(string $html): array
     {
-        preg_match_all('/href="(\/news\/[a-zA-Z0-9]+)"/', $html, $matches);
+        $dom = new HtmlDocument($html);
 
-        $urls = array_map(
-            fn (string $path): string => self::DOMAIN.$path,
-            $matches[1],
-        );
+        $urls = [];
+
+        foreach ($dom->elements('//a[starts-with(@href, "/news/")]') as $anchor) {
+            $urls[] = self::DOMAIN.$dom->attr($anchor, 'href');
+        }
 
         return array_values(array_unique($urls));
     }
@@ -77,11 +79,17 @@ class AdaDeranaTamilScraper implements SourceScraper
     {
         $html = Http::newsSource()->get($url)->throw()->body();
 
-        if (! preg_match('/<div class="w-full md:text-4xl text-2xl font-bold mt-2 mb-2">([^<]+)<\/div>/', $html, $titleMatch)) {
+        $dom = new HtmlDocument($html);
+
+        $title = $dom->text($dom->first(
+            '//div[contains(@class, "text-4xl") and '.HtmlDocument::hasClass('font-bold').']'
+        ));
+
+        if ($title === null) {
             return null;
         }
 
-        $body = $this->extractBody($html);
+        $body = $this->extractBody($dom);
 
         if ($body === '') {
             return null;
@@ -89,48 +97,47 @@ class AdaDeranaTamilScraper implements SourceScraper
 
         return new ScrapedArticle(
             externalUrl: $url,
-            title: html_entity_decode(trim($titleMatch[1])),
+            title: $title,
             body: $body,
-            imageUrl: $this->extractImage($html),
-            publishedAt: $this->extractPublishedAt($html),
+            imageUrl: $this->extractImage($dom),
+            publishedAt: $this->extractPublishedAt($dom),
         );
     }
 
-    private function extractBody(string $html): string
+    private function extractBody(HtmlDocument $dom): string
     {
-        if (! preg_match('/<div class="article-html w-full mt-4">(.*?)<\/div>\s*<div class="mt-8 w-full mb-8 font-bold">/s', $html, $match)) {
+        $container = $dom->first('//div['.HtmlDocument::hasClass('article-html').']');
+
+        if ($container === null) {
             return '';
         }
 
-        preg_match_all('/<p[^>]*>(.*?)<\/p>/s', $match[1], $paragraphMatches);
-
-        $paragraphs = array_map(
-            fn (string $paragraph): string => trim(str_replace("\u{a0}", ' ', html_entity_decode(strip_tags($paragraph)))),
-            $paragraphMatches[1],
-        );
+        $paragraphs = $dom->paragraphs('.//p', $container);
 
         return implode("\n\n", array_filter($paragraphs, fn (string $paragraph): bool => $paragraph !== ''));
     }
 
-    private function extractImage(string $html): ?string
+    private function extractImage(HtmlDocument $dom): ?string
     {
-        if (preg_match('/<img[^>]+src="(https:\/\/ada-derana-prod-tamil-news-temp\.s3\.amazonaws\.com\/news-articles\/[^"]+)"/', $html, $match)) {
-            return $match[1];
-        }
-
-        return null;
+        return $dom->attr(
+            $dom->first('//img[starts-with(@src, "https://ada-derana-prod-tamil-news-temp.s3.amazonaws.com/news-articles/")]'),
+            'src',
+        );
     }
 
-    private function extractPublishedAt(string $html): ?Carbon
+    private function extractPublishedAt(HtmlDocument $dom): ?Carbon
     {
-        // The markup contains a React hydration comment between the time
-        // and the trailing "-" (e.g. "Jul 28, 2026 - 11:34 PM<!-- --> -"),
-        // so the raw text is stripped of tags/comments before parsing.
-        if (! preg_match('/<p class="text-xs mr-1">(.*?)<\/p>/s', $html, $match)) {
+        $node = $dom->first('//p['.HtmlDocument::hasClass('text-xs').' and '.HtmlDocument::hasClass('mr-1').']');
+
+        if ($node === null) {
             return null;
         }
 
-        $cleaned = trim(preg_replace('/\s*-\s*$/', '', trim(strip_tags($match[1]))) ?? '');
+        // The DOM parser already skips the React hydration comment sitting
+        // between the time and the trailing "-" (e.g. "Jul 28, 2026 - 11:34
+        // PM<!-- --> -"), since comment nodes never contribute to
+        // textContent. Only the trailing "-" needs stripping.
+        $cleaned = trim(preg_replace('/\s*-\s*$/', '', $dom->text($node) ?? '') ?? '');
 
         // Displayed in Sri Lanka local time with no explicit offset; anchor
         // to Asia/Colombo then normalize to UTC to match the app timezone.

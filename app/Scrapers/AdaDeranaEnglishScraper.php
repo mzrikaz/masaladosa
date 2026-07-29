@@ -5,6 +5,7 @@ namespace App\Scrapers;
 use App\Contracts\Scrapers\SourceScraper;
 use App\DataTransferObjects\ScrapedArticle;
 use App\Models\Source;
+use App\Support\Dom\HtmlDocument;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
@@ -66,20 +67,21 @@ class AdaDeranaEnglishScraper implements SourceScraper
      */
     private function extractListingCards(string $html): array
     {
-        preg_match_all(
-            '/href="(\/news\/[a-zA-Z0-9]+)".*?text-muted-foreground[^>]*>([^<]+)<\/span>/s',
-            $html,
-            $matches,
-            PREG_SET_ORDER,
-        );
+        $dom = new HtmlDocument($html);
 
         $seen = [];
         $cards = [];
 
-        foreach ($matches as $match) {
-            $url = self::DOMAIN.$match[1];
+        foreach ($dom->elements('//a[starts-with(@href, "/news/")]') as $anchor) {
+            $url = self::DOMAIN.$dom->attr($anchor, 'href');
 
             if (isset($seen[$url])) {
+                continue;
+            }
+
+            $timeNode = $dom->first('.//*['.HtmlDocument::hasClass('text-muted-foreground').']', $anchor);
+
+            if ($timeNode === null) {
                 continue;
             }
 
@@ -87,7 +89,7 @@ class AdaDeranaEnglishScraper implements SourceScraper
 
             $cards[] = [
                 'url' => $url,
-                'publishedAt' => $this->parseRelativeTime(trim($match[2])),
+                'publishedAt' => $this->parseRelativeTime($dom->text($timeNode) ?? ''),
             ];
         }
 
@@ -98,11 +100,15 @@ class AdaDeranaEnglishScraper implements SourceScraper
     {
         $html = Http::newsSource()->get($url)->throw()->body();
 
-        if (! preg_match('/<meta property="og:title" content="([^"]*)"\/>/', $html, $titleMatch)) {
+        $dom = new HtmlDocument($html);
+
+        $title = $dom->attr($dom->first('//meta[@property="og:title"]'), 'content');
+
+        if ($title === null) {
             return null;
         }
 
-        $body = $this->extractBody($html);
+        $body = $this->extractBody($dom);
 
         if ($body === '') {
             return null;
@@ -110,36 +116,26 @@ class AdaDeranaEnglishScraper implements SourceScraper
 
         return new ScrapedArticle(
             externalUrl: $url,
-            title: html_entity_decode(trim($titleMatch[1])),
+            title: $title,
             body: $body,
-            imageUrl: $this->extractImage($html),
+            imageUrl: $dom->attr($dom->first('//meta[@property="og:image"]'), 'content'),
             publishedAt: $publishedAt,
         );
     }
 
-    private function extractBody(string $html): string
+    private function extractBody(HtmlDocument $dom): string
     {
-        if (! preg_match('/<div class="prose prose-lg mx-auto">\s*<div class="w-full dark:text-white">(.*?)<\/div>\s*<\/div>/s', $html, $match)) {
+        $container = $dom->first(
+            '//div['.HtmlDocument::hasClass('prose').' and '.HtmlDocument::hasClass('prose-lg').']'
+        );
+
+        if ($container === null) {
             return '';
         }
 
-        preg_match_all('/<p[^>]*>(.*?)<\/p>/s', $match[1], $paragraphMatches);
-
-        $paragraphs = array_map(
-            fn (string $paragraph): string => trim(str_replace("\u{a0}", ' ', html_entity_decode(strip_tags($paragraph)))),
-            $paragraphMatches[1],
-        );
+        $paragraphs = $dom->paragraphs('.//p', $container);
 
         return implode("\n\n", array_filter($paragraphs, fn (string $paragraph): bool => $paragraph !== ''));
-    }
-
-    private function extractImage(string $html): ?string
-    {
-        if (preg_match('/<meta property="og:image" content="([^"]*)"\/>/', $html, $match)) {
-            return $match[1];
-        }
-
-        return null;
     }
 
     private function parseRelativeTime(string $text): ?Carbon
